@@ -1,60 +1,255 @@
-.upload-zone {
-  border: 2.5px dashed #80b1d5;
-  border-radius: 16px;
-  padding: 44px 32px;
-  text-align: center;
-  cursor: pointer;
-  background: #f7fafd;
-  margin-bottom: 22px;
-  transition: background 0.2s, border-color 0.2s;
+import { useState, useContext } from 'react';
+import { ToastContext } from '../App';
+import './Data.css';
+
+export default function Data({ openChat, addProjection }) {
+  const toast = useContext(ToastContext);
+  const [files, setFiles] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [importModal, setImportModal] = useState(null); // holds file being configured for import
+
+  const uploadFile = async (file) => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'xlsx', 'xls'].includes(ext)) {
+      toast('Only CSV and Excel (.xlsx) files are supported');
+      return;
+    }
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const entry = { id: Date.now(), ...data };
+      setFiles(prev => [entry, ...prev]);
+      setPreview(entry);
+      toast(`"${data.name}" loaded — ${data.rowCount} rows`);
+    } catch (err) {
+      toast('Error: ' + err.message);
+      console.error(err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFiles = (fileList) => Array.from(fileList).forEach(uploadFile);
+
+  const removeFile = (id) => {
+    setFiles(prev => prev.filter(f => f.id !== id));
+    if (preview?.id === id) setPreview(null);
+    toast('File removed');
+  };
+
+  const analyzeWithAI = (file) => {
+    const sample = file.rows.slice(0, 15);
+    const dataStr = `File: ${file.name}\nColumns: ${file.headers.join(', ')}\nSample data:\n` +
+      sample.map(r => file.headers.map((h, i) => `${h}: ${r[i] ?? ''}`).join(' | ')).join('\n');
+    const prompt = `Please analyze this financial data and give me key insights, trends, and recommendations:\n\n${dataStr}`;
+    // Store for chatbot to pick up
+    window.__pendingChatPrompt = prompt;
+    openChat('__data_analysis__');
+  };
+
+  // Open the import configuration modal
+  const openImportModal = (file) => {
+    const nc = file.numericCols || {};
+    const headers = file.headers;
+    // Try to auto-detect common column names
+    const guess = (keywords) => {
+      const h = headers.find(h => keywords.some(k => h.toLowerCase().includes(k)));
+      return h || '';
+    };
+    setImportModal({
+      file,
+      name: file.name.replace(/\.(csv|xlsx|xls)$/i, ''),
+      revCol:  guess(['revenue', 'sales', 'income', 'gross']),
+      costCol: guess(['cost', 'expense', 'spend', 'cogs']),
+      invCol:  guess(['invest', 'capital', 'startup', 'initial']),
+      mo: '12',
+      grow: '0',
+      disc: '8',
+    });
+  };
+
+  const confirmImport = () => {
+    if (!importModal) return;
+    const { file, name, revCol, costCol, invCol, mo, grow, disc } = importModal;
+    const nc = file.numericCols || {};
+
+    const getAvg = (colName) => {
+      if (!colName) return 0;
+      const idx = file.headers.indexOf(colName);
+      if (idx === -1) return 0;
+      const vals = file.rows
+        .map(r => parseFloat(String(r[idx] || '').replace(/[$,%\s]/g, '')))
+        .filter(v => !isNaN(v) && isFinite(v));
+      if (!vals.length) return 0;
+      return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+    };
+
+    addProjection({
+      name: name || file.name,
+      rev:  getAvg(revCol),
+      cost: getAvg(costCol),
+      inv:  getAvg(invCol),
+      mo:   parseInt(mo) || 12,
+      grow: parseFloat(grow) || 0,
+      disc: parseFloat(disc) || 8,
+    });
+    setImportModal(null);
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">Data</h1>
+      </div>
+
+      {/* Upload Zone */}
+      <div
+        className={`upload-zone ${dragOver ? 'drag-over' : ''} ${uploading ? 'uploading' : ''}`}
+        onClick={() => !uploading && document.getElementById('file-input').click()}
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); if (!uploading) handleFiles(e.dataTransfer.files); }}
+      >
+        <div className="upload-icon">{uploading ? '⏳' : '📂'}</div>
+        <div className="upload-title">{uploading ? 'Uploading & parsing file...' : 'Upload Financial Data'}</div>
+        <div className="upload-sub">Drag & drop or click to select — supports CSV and Excel (.xlsx, .xls)</div>
+        <button
+          className="btn btn-primary"
+          onClick={e => { e.stopPropagation(); if (!uploading) document.getElementById('file-input').click(); }}
+          disabled={uploading}
+        >
+          {uploading ? 'Processing...' : 'Select Files'}
+        </button>
+        <input
+          id="file-input"
+          type="file"
+          style={{ display: 'none' }}
+          accept=".csv,.xlsx,.xls"
+          multiple
+          onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
+        />
+      </div>
+
+      {/* File List */}
+      {files.length > 0 && (
+        <div className="file-list">
+          {files.map(f => (
+            <div key={f.id} className={`file-card ${preview?.id === f.id ? 'active' : ''}`}>
+              <div className="file-card-info" onClick={() => setPreview(f)}>
+                <div className="file-card-name">📄 {f.name}</div>
+                <div className="file-card-meta">{f.rowCount} rows · {f.headers.length} columns · Click to preview</div>
+              </div>
+              <div className="file-card-actions">
+                <button className="btn btn-secondary sm-btn" onClick={() => setPreview(f)}>Preview</button>
+                <button className="btn btn-danger sm-btn"    onClick={() => removeFile(f.id)}>Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Preview Table */}
+      {preview && (
+        <div className="card file-preview">
+          <div className="preview-header">
+            <div>
+              <div className="preview-title">{preview.name}</div>
+              <div className="preview-meta">{preview.rowCount} total rows · showing first 50</div>
+            </div>
+            <div className="preview-actions">
+              <button className="btn btn-primary"   onClick={() => analyzeWithAI(preview)}>Analyze with AI ✦</button>
+              <button className="btn btn-secondary" onClick={() => openImportModal(preview)}>Open as Projection</button>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>{preview.headers.map((h, i) => <th key={i}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {preview.rows.slice(0, 50).map((row, ri) => (
+                  <tr key={ri}>
+                    {preview.headers.map((_, ci) => <td key={ci}>{row[ci] ?? ''}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {importModal && (
+        <div className="modal-backdrop" onClick={() => setImportModal(null)}>
+          <div className="modal import-modal" onClick={e => e.stopPropagation()}>
+            <h3>Open as Projection</h3>
+            <p>Map your file's columns to projection inputs. Leave blank if not applicable.</p>
+
+            <div className="field">
+              <label>Projection Name</label>
+              <input
+                value={importModal.name}
+                onChange={e => setImportModal(m => ({ ...m, name: e.target.value }))}
+                placeholder="e.g. Q3 Revenue Forecast"
+              />
+            </div>
+
+            <div className="import-grid">
+              <div className="field">
+                <label>Revenue Column</label>
+                <select value={importModal.revCol} onChange={e => setImportModal(m => ({ ...m, revCol: e.target.value }))}>
+                  <option value="">-- none --</option>
+                  {importModal.file.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Cost / Expense Column</label>
+                <select value={importModal.costCol} onChange={e => setImportModal(m => ({ ...m, costCol: e.target.value }))}>
+                  <option value="">-- none --</option>
+                  {importModal.file.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Investment Column</label>
+                <select value={importModal.invCol} onChange={e => setImportModal(m => ({ ...m, invCol: e.target.value }))}>
+                  <option value="">-- none --</option>
+                  {importModal.file.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Projection Period (months)</label>
+                <input type="number" value={importModal.mo} min="1" max="60"
+                  onChange={e => setImportModal(m => ({ ...m, mo: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>Growth Rate (%/mo)</label>
+                <input type="number" value={importModal.grow} step="0.1"
+                  onChange={e => setImportModal(m => ({ ...m, grow: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>Discount Rate (%/yr)</label>
+                <input type="number" value={importModal.disc} step="0.1"
+                  onChange={e => setImportModal(m => ({ ...m, disc: e.target.value }))} />
+              </div>
+            </div>
+
+            <div style={{ background: '#f0f4f8', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#555' }}>
+              ℹ️ Column values will be averaged across all rows to produce monthly figures.
+            </div>
+
+            <div className="modal-btns">
+              <button className="btn" style={{ background: '#eee', color: '#444' }} onClick={() => setImportModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={confirmImport}>Create Projection</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
-.upload-zone:hover, .upload-zone.drag-over { background: #e5f0fb; border-color: #4a8fc0; }
-.upload-zone.uploading { cursor: wait; opacity: 0.7; }
-.upload-icon  { font-size: 44px; margin-bottom: 10px; }
-.upload-title { font-size: 19px; font-weight: 600; color: #0e084c; margin-bottom: 7px; }
-.upload-sub   { font-size: 13px; color: #aaa; margin-bottom: 16px; }
-
-.file-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
-
-.file-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 13px 17px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
-  border: 2px solid transparent;
-  transition: border-color 0.15s;
-}
-.file-card.active  { border-color: #80b1d5; }
-.file-card-info    { cursor: pointer; flex: 1; }
-.file-card-name    { font-size: 15px; font-weight: 600; color: #0e084c; }
-.file-card-meta    { font-size: 12px; color: #aaa; margin-top: 2px; }
-.file-card-actions { display: flex; gap: 8px; margin-left: 12px; }
-
-.file-preview { margin-top: 4px; }
-.preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
-.preview-title  { font-size: 15px; font-weight: 600; color: #0e084c; }
-.preview-meta   { font-size: 12px; color: #bbb; font-weight: 400; }
-.preview-actions { display: flex; gap: 9px; }
-
-.table-scroll { overflow-x: auto; }
-.data-table   { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data-table th { background: #0d1b4b; color: #fff; padding: 9px 13px; text-align: left; font-weight: 500; white-space: nowrap; }
-.data-table td { padding: 8px 13px; border-bottom: 1px solid #eef0f4; color: #333; white-space: nowrap; }
-.data-table tr:hover td { background: #f7f9fc; }
-.data-table tr:last-child td { border-bottom: none; }
-
-.sm-btn { padding: 6px 13px !important; font-size: 12px !important; }
-
-.import-modal { width: 520px; max-width: 95vw; }
-.import-modal h3 { margin-bottom: 6px; }
-.import-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-.import-grid .field { margin-bottom: 0; }
-.import-grid .field select {
-  width: 100%; padding: 9px 12px; border: 1.5px solid #dde3ed;
-  border-radius: 10px; font-size: 14px; color: #0e084c;
-  outline: none; font-family: inherit; background: #fff; cursor: pointer;
-}
-.import-grid .field select:focus { border-color: #80b1d5; }

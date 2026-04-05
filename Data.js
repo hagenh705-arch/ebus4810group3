@@ -1,173 +1,186 @@
-.chat-wrap {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 64px);
-  max-height: 720px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.1);
-  overflow: hidden;
+import { useState, useEffect, useRef, useContext } from 'react';
+import { ToastContext } from '../App';
+import './Chatbot.css';
+
+const SYSTEM_CONTEXT = `User: John Doe, owner of Doe Logistics LLC (Transportation & Logistics).
+Active projections in the system: Profitability of New Truck, Ad Campaign Returns, Supply Costs 2026.`;
+
+const STARTER_MSGS = {
+  'Discounting Explanation': "Picking up our discounting discussion for Doe Logistics.\n\nKey rules for trucking discounts:\n• Never go below fully-loaded cost/mile ($2.50–$4.00 typical)\n• Volume discounts: lower rate for clients shipping 20+ loads/month\n• Lane discounts: cheaper on routes you already run\n• Early pay: 2% off if invoice paid within 10 days\n\nWhat scenario are you considering?",
+  'Price-per-Lead Chat': "Back to price-per-lead analysis.\n\nBenchmarks for logistics:\n• Referrals: $0–$25/lead\n• Google Ads: $60–$150/lead\n• LinkedIn B2B: $80–$200/lead\n• Trade shows: $200–$500/lead\n\nTarget: CPL under 15% of your average contract value.\n\nWhat's your current lead gen setup?",
+  'Alternative Supply Options': "Resuming your supply cost analysis. Your projection shows $7,000/mo.\n\nTop options:\n• Fuel hedging: lock diesel prices (saves 5–15%)\n• Group purchasing co-ops: bulk pricing on parts/tires\n• Predictive maintenance: cuts costs 15–25%\n• Route optimization: reduces fuel 8–12%\n\n10% reduction = $8,400/year saved. Want to model a scenario?",
+};
+
+function Message({ role, text }) {
+  return (
+    <div className={`msg ${role}`}>
+      <div className="msg-avatar">{role === 'user' ? 'JD' : 'AI'}</div>
+      <div className="msg-bubble">{text}</div>
+    </div>
+  );
 }
 
-.chat-header {
-  background: #0d1b4b;
-  color: #fff;
-  padding: 14px 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
+function TypingIndicator() {
+  return (
+    <div className="msg assistant">
+      <div className="msg-avatar">AI</div>
+      <div className="msg-bubble typing-bubble">
+        <span /><span /><span />
+      </div>
+    </div>
+  );
 }
 
-.chat-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #80b1d5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: #0d1b4b;
-  flex-shrink: 0;
-}
+export default function Chatbot({ initTitle }) {
+  const toast = useContext(ToastContext);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState('');
+  const bottomRef = useRef(null);
+  const abortRef = useRef(null);
 
-.chat-title    { font-weight: 600; font-size: 15px; }
-.chat-subtitle { font-size: 11px; opacity: 0.65; }
+  const initChat = () => {
+    setMessages([{
+      role: 'assistant',
+      content: "Hi John! I'm your Rune Business Advisor, powered by Claude.\n\nI can help with financial projections, pricing strategy, cost analysis, trucking operations, and any business questions.\n\nWhat would you like to work on today?"
+    }]);
+  };
 
-.chat-history-bar {
-  background: #1a2d6e;
-  padding: 7px 14px;
-  display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  flex-shrink: 0;
-}
-.chat-history-bar::-webkit-scrollbar { height: 3px; }
-.chat-history-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+  useEffect(() => {
+    if (initTitle && STARTER_MSGS[initTitle]) {
+      setMessages([{ role: 'assistant', content: STARTER_MSGS[initTitle] }]);
+    } else {
+      initChat();
+    }
+  }, [initTitle]);
 
-.hist-btn {
-  background: rgba(128,177,213,0.25);
-  border: none;
-  color: #b8d4e8;
-  border-radius: 18px;
-  padding: 4px 13px;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  font-family: inherit;
-  transition: background 0.15s;
-}
-.hist-btn:hover { background: rgba(128,177,213,0.45); }
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamText]);
 
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: #f7f9fc;
-}
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || streaming) return;
+    setInput('');
 
-.msg {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  max-width: 80%;
-}
-.msg.user {
-  align-self: flex-end;
-  flex-direction: row-reverse;
-}
-.msg.assistant { align-self: flex-start; }
+    const newMessages = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
+    setStreaming(true);
+    setStreamText('');
 
-.msg-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.msg.assistant .msg-avatar { background: #80b1d5; color: #0d1b4b; }
-.msg.user      .msg-avatar { background: #0d1b4b; color: #fff; border: 2px solid #80b1d5; }
+    // Build API messages (convert role names)
+    const apiMessages = newMessages.map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
 
-.msg-bubble {
-  padding: 11px 15px;
-  border-radius: 18px;
-  font-size: 14px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.msg.assistant .msg-bubble {
-  background: #fff;
-  color: #0e084c;
-  border: 1.5px solid #e0e7ef;
-  border-bottom-left-radius: 4px;
-}
-.msg.user .msg-bubble {
-  background: #0d1b4b;
-  color: #fff;
-  border-bottom-right-radius: 4px;
-}
+    try {
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-.typing-bubble {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  min-height: 20px;
-}
-.typing-bubble span {
-  width: 7px; height: 7px;
-  background: #80b1d5;
-  border-radius: 50%;
-  animation: bop 1.2s infinite;
-  display: block;
-}
-.typing-bubble span:nth-child(2) { animation-delay: 0.2s; }
-.typing-bubble span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes bop { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-7px)} }
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ messages: apiMessages, systemContext: SYSTEM_CONTEXT }),
+      });
 
-.chat-input-row {
-  padding: 13px 16px;
-  background: #fff;
-  border-top: 1.5px solid #e8ecf4;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-shrink: 0;
-}
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Server error');
+      }
 
-.chat-input {
-  flex: 1;
-  border: 1.5px solid #dde3ed;
-  border-radius: 22px;
-  padding: 10px 17px;
-  font-size: 14px;
-  outline: none;
-  color: #0e084c;
-  font-family: inherit;
-}
-.chat-input:focus { border-color: #80b1d5; }
-.chat-input:disabled { background: #f5f5f5; }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
 
-.send-btn {
-  width: 38px; height: 38px;
-  border-radius: 50%;
-  background: #0d1b4b;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: background 0.15s;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                fullText += parsed.text;
+                setStreamText(fullText);
+              }
+              if (parsed.error) throw new Error(parsed.error);
+            } catch (e) {
+              if (e.message !== 'Unexpected end of JSON input') throw e;
+            }
+          }
+        }
+      }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: fullText }]);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Sorry, I encountered an error: ${err.message}\n\nMake sure your ANTHROPIC_API_KEY is set in the .env file and the server is running.`
+        }]);
+      }
+    } finally {
+      setStreaming(false);
+      setStreamText('');
+    }
+  };
+
+  const loadHistory = (title) => {
+    const msg = STARTER_MSGS[title];
+    if (msg) setMessages([{ role: 'assistant', content: msg }]);
+  };
+
+  return (
+    <div className="chat-wrap">
+      <div className="chat-header">
+        <div className="chat-avatar">AI</div>
+        <div>
+          <div className="chat-title">Rune Business Advisor</div>
+          <div className="chat-subtitle">Powered by Claude · Your financial AI</div>
+        </div>
+      </div>
+
+      <div className="chat-history-bar">
+        {Object.keys(STARTER_MSGS).map(title => (
+          <button key={title} className="hist-btn" onClick={() => loadHistory(title)}>{title}</button>
+        ))}
+        <button className="hist-btn" onClick={initChat}>+ New Chat</button>
+      </div>
+
+      <div className="chat-messages">
+        {messages.map((m, i) => (
+          <Message key={i} role={m.role === 'user' ? 'user' : 'assistant'} text={m.content} />
+        ))}
+        {streaming && streamText ? (
+          <Message role="assistant" text={streamText} />
+        ) : streaming ? (
+          <TypingIndicator />
+        ) : null}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="chat-input-row">
+        <input
+          className="chat-input"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }}}
+          placeholder="Ask about your business, finances, projections..."
+          disabled={streaming}
+        />
+        <button className="send-btn" onClick={sendMessage} disabled={streaming || !input.trim()}>
+          <svg viewBox="0 0 24 24" fill="#fff" width="15" height="15">
+            <path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
 }
-.send-btn:hover:not(:disabled) { background: #1a2d6e; }
-.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }

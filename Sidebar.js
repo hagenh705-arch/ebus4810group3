@@ -1,39 +1,48 @@
-import { useState, useEffect } from 'react';
+.sidebar {
+  width: 62px;
+  background: #0d1b4b;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
-export default function Modal({ title, description, placeholder, onConfirm, onClose }) {
-  const [value, setValue] = useState('');
+.sidebar-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #e9e9e9;
+  opacity: 0.55;
+  transition: opacity 0.2s, background 0.2s;
+  padding: 0;
+}
 
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+.sidebar-btn svg {
+  width: 22px;
+  height: 22px;
+}
 
-  const confirm = () => {
-    if (!value.trim()) return;
-    onConfirm(value.trim());
-    onClose();
-  };
+.sidebar-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
 
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <h3>{title}</h3>
-        <p>{description}</p>
-        <div className="field">
-          <input
-            autoFocus
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            placeholder={placeholder}
-            onKeyDown={e => e.key === 'Enter' && confirm()}
-          />
-        </div>
-        <div className="modal-btns">
-          <button className="btn" style={{ background: '#eee', color: '#444' }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={confirm}>Confirm</button>
-        </div>
-      </div>
-    </div>
-  );
+.sidebar-btn.active {
+  opacity: 1;
+  background: rgba(128, 177, 213, 0.35);
+}
+
+.help-btn {
+  margin-top: auto;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: 'Segoe UI', sans-serif;
 }

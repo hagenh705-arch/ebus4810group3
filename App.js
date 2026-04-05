@@ -1,71 +1,88 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
+import React, { useState } from 'react';
+import Sidebar from './components/Sidebar';
+import Home from './pages/Home';
+import Projections from './pages/Projections';
+import Chatbot from './pages/Chatbot';
+import Data from './pages/Data';
+import Profile from './pages/Profile';
+import Settings from './pages/Settings';
+import Toast from './components/Toast';
+import './App.css';
 
-body {
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f0f2f5;
-  color: #0e084c;
+export const ToastContext = React.createContext(null);
+
+const DEFAULT_PROJS = [
+  { id: 1, name: 'Profitability of New Truck', date: '3/4/26',  inv: 120000, rev: 18000, cost: 12000, grow: 2,   mo: 36, disc: 8 },
+  { id: 2, name: 'Ad Campaign Returns',         date: '2/24/26', inv: 15000,  rev: 6000,  cost: 3500,  grow: 5,   mo: 12, disc: 10 },
+  { id: 3, name: 'Supply Costs: 2026',          date: '2/13/26', inv: 25000,  rev: 9500,  cost: 7000,  grow: 1.5, mo: 12, disc: 6 },
+];
+
+export default function App() {
+  const [page, setPage] = useState('home');
+  const [toast, setToast] = useState(null);
+  const [chatInitTitle, setChatInitTitle] = useState(null);
+
+  // Shared projections state — lifted up so Data page can add to it
+  const [projections, setProjections] = useState(DEFAULT_PROJS);
+  const [pendingProjId, setPendingProjId] = useState(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const openChat = (title) => {
+    setChatInitTitle(title);
+    setPage('chat');
+  };
+
+  const navigate = (p) => {
+    setChatInitTitle(null);
+    setPage(p);
+  };
+
+  // Called from Data page when user imports a file as a new projection
+  const addProjectionFromData = (projData) => {
+    const id = Date.now();
+    const d = new Date();
+    const newProj = {
+      id,
+      name: projData.name || 'Imported Projection',
+      date: `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`,
+      inv:  projData.inv  || 0,
+      rev:  projData.rev  || 0,
+      cost: projData.cost || 0,
+      grow: projData.grow || 0,
+      mo:   projData.mo   || 12,
+      disc: projData.disc || 8,
+    };
+    setProjections(prev => [newProj, ...prev]);
+    setPendingProjId(id);
+    showToast(`"${newProj.name}" added to Projections!`);
+    navigate('projections');
+  };
+
+  return (
+    <ToastContext.Provider value={showToast}>
+      <div className="app">
+        <Sidebar current={page} onNavigate={navigate} />
+        <main className="main">
+          {page === 'home'        && <Home onNavigate={navigate} openChat={openChat} />}
+          {page === 'projections' && (
+            <Projections
+              projections={projections}
+              setProjections={setProjections}
+              pendingProjId={pendingProjId}
+              clearPending={() => setPendingProjId(null)}
+            />
+          )}
+          {page === 'chat'        && <Chatbot initTitle={chatInitTitle} />}
+          {page === 'data'        && <Data openChat={openChat} addProjection={addProjectionFromData} />}
+          {page === 'profile'     && <Profile />}
+          {page === 'settings'    && <Settings />}
+        </main>
+        {toast && <Toast message={toast} />}
+      </div>
+    </ToastContext.Provider>
+  );
 }
-
-.app {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.main {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px;
-}
-
-/* ── BUTTONS ── */
-.btn { padding: 9px 18px; border-radius: 10px; border: none; font-size: 14px; cursor: pointer; font-weight: 500; transition: all 0.15s; font-family: inherit; }
-.btn-primary   { background: #0d1b4b; color: #fff; }
-.btn-primary:hover { background: #1a2d6e; }
-.btn-secondary { background: #80b1d5; color: #0e084c; }
-.btn-secondary:hover { background: #6aa0c8; }
-.btn-danger    { background: #e05252; color: #fff; }
-.btn-danger:hover { background: #c43c3c; }
-.btn:disabled  { opacity: 0.45; cursor: not-allowed; }
-
-/* ── PAGE HEADER ── */
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
-.page-title  { font-size: 36px; font-weight: 700; color: #0e084c; }
-.btn-row     { display: flex; gap: 10px; flex-wrap: wrap; }
-
-/* ── CARDS ── */
-.card { background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.09); }
-
-/* ── FORM INPUTS ── */
-.field { margin-bottom: 16px; }
-.field label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px; }
-.field input, .field textarea, .field select {
-  width: 100%; padding: 10px 13px; border: 1.5px solid #dde3ed;
-  border-radius: 10px; font-size: 14px; color: #0e084c;
-  outline: none; font-family: inherit; background: #fff;
-}
-.field input:focus, .field textarea:focus { border-color: #80b1d5; }
-
-/* ── TOAST ── */
-.toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: #0d1b4b; color: #fff; padding: 11px 22px;
-  border-radius: 10px; font-size: 14px; z-index: 1000;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2); white-space: nowrap;
-  animation: fadeInUp 0.25s ease;
-}
-@keyframes fadeInUp { from { opacity:0; transform: translateX(-50%) translateY(8px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
-
-/* ── MODAL ── */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-  z-index: 500; display: flex; align-items: center; justify-content: center;
-}
-.modal {
-  background: #fff; border-radius: 16px; padding: 28px;
-  width: 400px; max-width: 92vw;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-.modal h3 { font-size: 20px; font-weight: 700; color: #0e084c; margin-bottom: 6px; }
-.modal p  { font-size: 13px; color: #888; margin-bottom: 16px; }
-.modal-btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
